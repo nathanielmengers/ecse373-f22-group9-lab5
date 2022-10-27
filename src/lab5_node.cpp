@@ -51,20 +51,20 @@
   received_orders.push_back(*order_msg);
 }
 
+//MAKE THIS A std::string
 std::string find_bin(std::string material_type, ros::ServiceClient client){
   osrf_gear::GetMaterialLocations location_msg;
   location_msg.request.material_type = material_type;
   bool location_call_succeeded;
-  ROS_INFO("precall");
   location_call_succeeded = client.call(location_msg);
-  ROS_INFO("postcall");
   if (!location_call_succeeded){
     ROS_WARN("Material location returned failure.");
   } else{
       for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
-        ROS_INFO("%s is found in storage unit %s", material_type, unit.unit_id);
+        ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
       }
   }
+  return "Done";
  }
 int main(int argc, char **argv)
 {
@@ -116,7 +116,7 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(10);
   start_competition(n);
   
-  find_bin("gear-part" , location_client);
+  find_bin("gear_part", location_client);
   
   while (ros::ok())
   {
