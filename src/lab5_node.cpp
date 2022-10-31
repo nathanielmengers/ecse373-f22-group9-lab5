@@ -21,6 +21,8 @@
  * This tutorial demonstrates simple sending of messages over the ROS system.
  */
  std::vector<osrf_gear::Order> received_orders;
+ std::map<std::string, std::pair<std::string, int>> mat_bin;
+ std::map<std::string, osrf_gear::LogicalCameraImage> image_map;
  
  void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
@@ -51,6 +53,56 @@
   received_orders.push_back(*order_msg);
 }
 
+void camera_callback(std::string bin_name, const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	osrf_gear::LogicalCameraImage new_image = *image_msg;
+	if(image_map.find(bin_name) != image_map.end()){
+		image_map.insert(std::pair<std::string, osrf_gear::LogicalCameraImage>{bin_name, new_image});
+	}else{
+		image_map[bin_name] = new_image;
+	}
+}
+
+void agv1_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("agv1", image_msg);
+}
+
+void agv2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("agv2", image_msg);
+}
+
+void bin1_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin1", image_msg);
+}
+
+void bin2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin2", image_msg);
+}
+
+void bin3_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin3", image_msg);
+}
+
+void bin4_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin4", image_msg);
+}
+
+void bin5_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin5", image_msg);
+}
+
+void bin6_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("bin6", image_msg);
+}
+
+void qc1_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("qc1", image_msg);
+}
+
+void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
+	camera_callback("qc2", image_msg);
+}
+
+
 //MAKE THIS A std::string
 std::string find_bin(std::string material_type, ros::ServiceClient client){
   osrf_gear::GetMaterialLocations location_msg;
@@ -61,10 +113,14 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
     ROS_WARN("Material location returned failure.");
   } else{
       for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
-        ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
+        if(unit.unit_id.c_str() != "bin"){
+        	ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
+        	return unit.unit_id.c_str();
+        }
+        
       }
   }
-  return "Done";
+  return "NONE";
  }
 int main(int argc, char **argv)
 {
@@ -106,22 +162,53 @@ int main(int argc, char **argv)
    */
   ros::Publisher chatter_pub = n.advertise<std_msgs::String>("chatter", 1000);
 
+
+	// Subscribers for logical cameras.
+	ros::Subscriber camera_agv1_sub = n.subscribe("/ariac/logical_camera_agv1", 10, agv1_callback);
+	ros::Subscriber camera_agv2_sub = n.subscribe("/ariac/logical_camera_agv2", 10, agv2_callback);
+	ros::Subscriber camera_bin1_sub = n.subscribe("/ariac/logical_camera_bin1", 10, bin1_callback);
+	ros::Subscriber camera_bin2_sub = n.subscribe("/ariac/logical_camera_bin2", 10, bin2_callback);
+	ros::Subscriber camera_bin3_sub = n.subscribe("/ariac/logical_camera_bin3", 10, bin3_callback);
+	ros::Subscriber camera_bin4_sub = n.subscribe("/ariac/logical_camera_bin4", 10, bin4_callback);
+	ros::Subscriber camera_bin5_sub = n.subscribe("/ariac/logical_camera_bin5", 10, bin5_callback);
+	ros::Subscriber camera_bin6_sub = n.subscribe("/ariac/logical_camera_bin6", 10, bin6_callback);
+	ros::Subscriber camera_qc1_sub = n.subscribe("/ariac/quality_control_sensor_1", 10, qc1_callback);
+	ros::Subscriber camera_qc2_sub = n.subscribe("/ariac/quality_control_sensor_2", 10, qc2_callback);
+	
   // Subscribe to the '/ariac/orders' topic.
   ros::Subscriber orders_subscriber = n.subscribe("/ariac/orders", 10, order_callback);
   
-  // 
+  // client for GetMaterialLocations
   ros::ServiceClient location_client = n.serviceClient<osrf_gear::GetMaterialLocations>("/ariac/material_locations");
   location_client.waitForExistence();
   
   ros::Rate loop_rate(10);
   start_competition(n);
   
-  find_bin("gear_part", location_client);
+  // find_bin("gear_part", location_client);
   
   while (ros::ok())
   {
 
-
+		// if there are active orders, find where the parts are
+		if(!received_orders.empty()){
+				osrf_gear::Order order = received_orders.at(0);
+				received_orders.erase(received_orders.begin());
+				for(osrf_gear::Shipment shipment: order.shipments){
+					for(osrf_gear::Product product:shipment.products){
+						std::string bin = find_bin(product.type.c_str(), location_client);
+						if(mat_bin.find(product.type.c_str()) != mat_bin.end()){
+							mat_bin.at(product.type.c_str()).second += 1;
+						}
+						else{
+							mat_bin.insert(std::pair<std::string, std::pair<std::string, int>>{product.type.c_str(), std::pair<std::string, int>{bin, 1}});
+						}
+						geometry_msgs::Point position = image_map[bin].models[0].pose.position;
+						ROS_WARN_STREAM(product.type.c_str() << " is in bin: " << bin << " at position: x " << position.x << ", y " << position.y << ", z " << position.z);
+					}
+				}
+		}
+		
     ros::spinOnce();
 
     loop_rate.sleep();
