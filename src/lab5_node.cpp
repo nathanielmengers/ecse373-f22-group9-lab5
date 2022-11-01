@@ -20,7 +20,7 @@
 
 
  std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
- std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = bin_name, value = pair containing material type and number of products requested.
+ std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
  std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
  
  void start_competition(ros::NodeHandle & node){
@@ -54,7 +54,7 @@
 }
 
 
-//
+// Adds the most recent camera image to the image_map where key is the correspoding camera source location.
 void camera_callback(std::string bin_name, const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 	osrf_gear::LogicalCameraImage new_image = *image_msg; 
 	if(image_map.find(bin_name) != image_map.end()){
@@ -114,7 +114,7 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
   location_call_succeeded = client.call(location_msg); // query the material location
   if (!location_call_succeeded){
     ROS_WARN("Material location returned failure.");
-  } else{ // If the query succeeded, iterate through the list of storage units and return the name of the first storage unit containing the given material type 
+  } else{ // If the query succeeded, iterate through the list of storage units and return the name of the first storage unit containing the given material type that is not the belt.
       
       for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
         if(unit.unit_id.c_str() != "bin"){
@@ -189,32 +189,30 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(10);
   start_competition(n);
   
-  // find_bin("gear_part", location_client);
-  
   while (ros::ok())
   {
 
 		// if there are active orders, find where the parts are
 		if(!received_orders.empty()){
-		        // store the first order in received_orders as a separate variable, then remove that order from the list. 
-				osrf_gear::Order order = received_orders.at(0); 
-				received_orders.erase(received_orders.begin()); 
-                // Each order contains a set of shipments, which in turn have a list of products. For all shipments in the current order, identify the bin that each product is in. 
-                // Print the bin number and coordinates of the selected product in the bin. Track how many of that product type have been ordered (for inventory purposes). 
-				for(osrf_gear::Shipment shipment: order.shipments){
-					for(osrf_gear::Product product:shipment.products){
-						std::string bin = find_bin(product.type.c_str(), location_client);
+		  // store the first order in received_orders as a separate variable, then remove that order from the list. 
+			osrf_gear::Order order = received_orders.at(0); 
+			received_orders.erase(received_orders.begin()); 
+      // Each order contains a set of shipments, which in turn have a list of products. For all shipments in the current order, identify the bin that each product is in. 
+      // Print the bin number and coordinates of the selected product in the bin. Track how many of that product type have been ordered (for inventory purposes).
+			for(osrf_gear::Shipment shipment: order.shipments){
+				for(osrf_gear::Product product:shipment.products){
+					std::string bin = find_bin(product.type.c_str(), location_client);
 						
-						if(mat_bin.find(product.type.c_str()) != mat_bin.end()){
-							mat_bin.at(product.type.c_str()).second += 1;
-						}
-						else{
-							mat_bin.insert(std::pair<std::string, std::pair<std::string, int>>{product.type.c_str(), std::pair<std::string, int>{bin, 1}});
-						}
-						geometry_msgs::Point position = image_map[bin].models[0].pose.position;
-						ROS_WARN_STREAM(product.type.c_str() << " is in bin: " << bin << " at position: x " << position.x << ", y " << position.y << ", z " << position.z);
+					if(mat_bin.find(product.type.c_str()) != mat_bin.end()){
+						mat_bin.at(product.type.c_str()).second += 1;
 					}
+					else{
+						mat_bin.insert(std::pair<std::string, std::pair<std::string, int>>{product.type.c_str(), std::pair<std::string, int>{bin, 1}});
+					}
+					geometry_msgs::Point position = image_map[bin].models[0].pose.position;
+					ROS_WARN_STREAM(product.type.c_str() << " is in bin: " << bin << " at position: x " << position.x << ", y " << position.y << ", z " << position.z);
 				}
+			}
 		}
 		
     ros::spinOnce();
