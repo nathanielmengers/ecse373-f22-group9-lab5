@@ -17,12 +17,11 @@
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
-/**
- * This tutorial demonstrates simple sending of messages over the ROS system.
- */
- std::vector<osrf_gear::Order> received_orders;
- std::map<std::string, std::pair<std::string, int>> mat_bin;
- std::map<std::string, osrf_gear::LogicalCameraImage> image_map;
+
+
+ std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
+ std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = bin_name, value = pair containing material type and number of products requested.
+ std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
  
  void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
@@ -38,23 +37,26 @@
   ROS_INFO("Requesting competition start...");
   std_srvs::Trigger begin_comp;  // Combination of the "request" and the "response".
   bool service_call_succeeded;
-  service_call_succeeded =  begin_client.call(begin_comp);  // Call the start Service.
+  service_call_succeeded =  begin_client.call(begin_comp);  // Call the service to start the competition. Returns true if the client was able to initiate the service
   if (!service_call_succeeded) {
       ROS_ERROR("Competition service call failed! Goodness Gracious!!");
-  } else if (!begin_comp.response.success) {  // If not successful, print out why.
+  } else if (!begin_comp.response.success) {  // Even if the call to the service succeeded, the service might not execute successfully. If execution failed, print why.
       ROS_WARN("Competition service returned failure: %s", begin_comp.response.message.c_str());
-  } else {
+  } else { // if the service was called and executed successfully, inform user
       ROS_INFO("Competition service called succesfully! %s", begin_comp.response.message.c_str());
   }
  }
  
+
  void order_callback(const osrf_gear::Order::ConstPtr & order_msg) {
-  ROS_INFO_STREAM("Received order:\n" << *order_msg);
-  received_orders.push_back(*order_msg);
+  ROS_INFO_STREAM("Received order:\n" << *order_msg);  // Display incoming order messages, which contain a unit_ids (string) and lists of shipments (vector).  
+  received_orders.push_back(*order_msg); // Add new orders to the end of the list of orders
 }
 
+
+//
 void camera_callback(std::string bin_name, const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
-	osrf_gear::LogicalCameraImage new_image = *image_msg;
+	osrf_gear::LogicalCameraImage new_image = *image_msg; 
 	if(image_map.find(bin_name) != image_map.end()){
 		image_map.insert(std::pair<std::string, osrf_gear::LogicalCameraImage>{bin_name, new_image});
 	}else{
@@ -62,6 +64,7 @@ void camera_callback(std::string bin_name, const osrf_gear::LogicalCameraImage::
 	}
 }
 
+// Define callbacks for each of the cameras
 void agv1_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 	camera_callback("agv1", image_msg);
 }
@@ -103,15 +106,16 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 }
 
 
-//MAKE THIS A std::string
+// Method for identifying the name of the bin that a given product is in.
 std::string find_bin(std::string material_type, ros::ServiceClient client){
-  osrf_gear::GetMaterialLocations location_msg;
+  osrf_gear::GetMaterialLocations location_msg; // location_msg can contain a material_type string and list of storage units where the material may be found
   location_msg.request.material_type = material_type;
   bool location_call_succeeded;
-  location_call_succeeded = client.call(location_msg);
+  location_call_succeeded = client.call(location_msg); // query the material location
   if (!location_call_succeeded){
     ROS_WARN("Material location returned failure.");
-  } else{
+  } else{ // If the query succeeded, iterate through the list of storage units and return the name of the first storage unit containing the given material type 
+      
       for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
         if(unit.unit_id.c_str() != "bin"){
         	ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
@@ -120,7 +124,7 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
         
       }
   }
-  return "NONE";
+  return "NONE"; // if no storage units contain the given material type, return "NONE"
  }
 int main(int argc, char **argv)
 {
@@ -163,7 +167,7 @@ int main(int argc, char **argv)
   ros::Publisher chatter_pub = n.advertise<std_msgs::String>("chatter", 1000);
 
 
-	// Subscribers for logical cameras.
+	// Subscriber nodes for logical cameras.
 	ros::Subscriber camera_agv1_sub = n.subscribe("/ariac/logical_camera_agv1", 10, agv1_callback);
 	ros::Subscriber camera_agv2_sub = n.subscribe("/ariac/logical_camera_agv2", 10, agv2_callback);
 	ros::Subscriber camera_bin1_sub = n.subscribe("/ariac/logical_camera_bin1", 10, bin1_callback);
@@ -178,7 +182,7 @@ int main(int argc, char **argv)
   // Subscribe to the '/ariac/orders' topic.
   ros::Subscriber orders_subscriber = n.subscribe("/ariac/orders", 10, order_callback);
   
-  // client for GetMaterialLocations
+  // Define client for GetMaterialLocations
   ros::ServiceClient location_client = n.serviceClient<osrf_gear::GetMaterialLocations>("/ariac/material_locations");
   location_client.waitForExistence();
   
@@ -192,11 +196,15 @@ int main(int argc, char **argv)
 
 		// if there are active orders, find where the parts are
 		if(!received_orders.empty()){
-				osrf_gear::Order order = received_orders.at(0);
-				received_orders.erase(received_orders.begin());
+		        // store the first order in received_orders as a separate variable, then remove that order from the list. 
+				osrf_gear::Order order = received_orders.at(0); 
+				received_orders.erase(received_orders.begin()); 
+                // Each order contains a set of shipments, which in turn have a list of products. For all shipments in the current order, identify the bin that each product is in. 
+                // Print the bin number and coordinates of the selected product in the bin. Track how many of that product type have been ordered (for inventory purposes). 
 				for(osrf_gear::Shipment shipment: order.shipments){
 					for(osrf_gear::Product product:shipment.products){
 						std::string bin = find_bin(product.type.c_str(), location_client);
+						
 						if(mat_bin.find(product.type.c_str()) != mat_bin.end()){
 							mat_bin.at(product.type.c_str()).second += 1;
 						}
