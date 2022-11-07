@@ -189,6 +189,9 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(10);
   start_competition(n);
   
+  ros::MultiThreadedSpinner spinner(1);
+  spinner.spin();
+  
   while (ros::ok())
   {
 
@@ -214,8 +217,6 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-		
-    ros::spinOnce();
 
     loop_rate.sleep();
 
