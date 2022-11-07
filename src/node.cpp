@@ -14,6 +14,7 @@
 #include <sstream>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <vector>
+#include "ur_kinematics/ur_kin.h"
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
@@ -22,6 +23,7 @@
  std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
  std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
  std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
+ sensor_msgs::JointState joint_states;
  
  void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
@@ -105,6 +107,10 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 	camera_callback("qc2", image_msg);
 }
 
+// Joint State Subscriber Callback, stores joint_statesa
+void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
+	joint_states = *msg;
+}
 
 // Method for identifying the name of the bin that a given product is in.
 std::string find_bin(std::string material_type, ros::ServiceClient client){
@@ -116,16 +122,21 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
     ROS_WARN("Material location returned failure.");
   } else{ // If the query succeeded, iterate through the list of storage units and return the name of the first storage unit containing the given material type that is not the belt.
       
-      for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
-        if(unit.unit_id.c_str() != "bin"){
-        	ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
-        	return unit.unit_id.c_str();
+    for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
+      if(unit.unit_id.c_str() != "belt"){
+      	ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
+     	  	return unit.unit_id.c_str();
         }
         
-      }
+    }
   }
   return "NONE"; // if no storage units contain the given material type, return "NONE"
- }
+}
+ 
+
+ 
+ 
+ 
 int main(int argc, char **argv)
 {
   /**
@@ -164,8 +175,6 @@ int main(int argc, char **argv)
    * than we can send them, the number here specifies how many messages to
    * buffer up before throwing some away.
    */
-  ros::Publisher chatter_pub = n.advertise<std_msgs::String>("chatter", 1000);
-
 
 	// Subscriber nodes for logical cameras.
 	ros::Subscriber camera_agv1_sub = n.subscribe("/ariac/logical_camera_agv1", 10, agv1_callback);
@@ -179,6 +188,9 @@ int main(int argc, char **argv)
 	ros::Subscriber camera_qc1_sub = n.subscribe("/ariac/quality_control_sensor_1", 10, qc1_callback);
 	ros::Subscriber camera_qc2_sub = n.subscribe("/ariac/quality_control_sensor_2", 10, qc2_callback);
 	
+	//JointState subscriber
+	ros::Subscriber joint_state_sub = n.subscribe("/ariac/arm1/joint_states", 10, joint_state_callback);
+	
   // Subscribe to the '/ariac/orders' topic.
   ros::Subscriber orders_subscriber = n.subscribe("/ariac/orders", 10, order_callback);
   
@@ -189,8 +201,8 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(10);
   start_competition(n);
   
-  ros::MultiThreadedSpinner spinner(1);
-  spinner.spin();
+  ros::AsyncSpinner spinner(1);
+  spinner.start();
   
   while (ros::ok())
   {
@@ -217,9 +229,11 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-
-    loop_rate.sleep();
-
+		
+		ROS_INFO_STREAM_THROTTLE(10, joint_states);
+		
+		//ros::spinOnce();
+	  loop_rate.sleep();
 
   }
 
