@@ -148,6 +148,7 @@ add_executable(lab_node src/node.cpp)
 ## Specify libraries to link a library or executable target against
  target_link_libraries(lab_node
    ${catkin_LIBRARIES}
+   ur10_kin
  )
 
 #############

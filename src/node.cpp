@@ -107,9 +107,10 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 	camera_callback("qc2", image_msg);
 }
 
-// Joint State Subscriber Callback, stores joint_statesa
+// Joint State Subscriber Callback, stores joint_states
 void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
 	joint_states = *msg;
+	ROS_INFO_STREAM("I AM HERE " << *msg);
 }
 
 // Method for identifying the name of the bin that a given product is in.
@@ -123,7 +124,7 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
   } else{ // If the query succeeded, iterate through the list of storage units and return the name of the first storage unit containing the given material type that is not the belt.
       
     for (osrf_gear::StorageUnit unit : location_msg.response.storage_units){
-      if(unit.unit_id.c_str() != "belt"){
+      if(unit.unit_id != "belt"){
       	ROS_INFO("%s is found in storage unit %s", material_type.c_str(), unit.unit_id.c_str());
      	  	return unit.unit_id.c_str();
         }
@@ -191,17 +192,17 @@ int main(int argc, char **argv)
 	//JointState subscriber
 	ros::Subscriber joint_state_sub = n.subscribe("/ariac/arm1/joint_states", 10, joint_state_callback);
 	
-  // Subscribe to the '/ariac/orders' topic.
+  //Subscribe to the '/ariac/orders' topic.
   ros::Subscriber orders_subscriber = n.subscribe("/ariac/orders", 10, order_callback);
   
-  // Define client for GetMaterialLocations
+  //Define client for GetMaterialLocations
   ros::ServiceClient location_client = n.serviceClient<osrf_gear::GetMaterialLocations>("/ariac/material_locations");
   location_client.waitForExistence();
   
   ros::Rate loop_rate(10);
   start_competition(n);
   
-  ros::AsyncSpinner spinner(1);
+  ros::AsyncSpinner spinner(4);
   spinner.start();
   
   while (ros::ok())
@@ -230,9 +231,8 @@ int main(int argc, char **argv)
 			}
 		}
 		
-		ROS_INFO_STREAM_THROTTLE(10, joint_states);
+		//ROS_INFO_STREAM_THROTTLE(10, joint_states);
 		
-		//ros::spinOnce();
 	  loop_rate.sleep();
 
   }
