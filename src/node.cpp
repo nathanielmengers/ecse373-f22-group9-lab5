@@ -3,30 +3,34 @@
 #include <osrf_gear/LogicalCameraImage.h>
 #include <osrf_gear/Order.h>
 #include <osrf_gear/Proximity.h>
-#include "ros/ros.h"
+#include <ros/ros.h>
 #include <sensor_msgs/JointState.h>
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/Range.h>
 #include <std_msgs/Float32.h>
-#include "std_msgs/String.h"
-#include "std_srvs/SetBool.h"
-#include "std_srvs/Trigger.h"
+#include <std_msgs/String.h>
+#include <std_srvs/SetBool.h>
+#include <std_srvs/Trigger.h>
 #include <sstream>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <vector>
-#include "ur_kinematics/ur_kin.h"
+#include <ur_kinematics/ur_kin.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <geometry_msgs/TransformStamped.h>
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
 
 
- std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
- std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
- std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
- sensor_msgs::JointState joint_states;
+std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
+std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
+std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
+sensor_msgs::JointState joint_states;
 std::vector<double> joint_positions;
+int count = 0;
  
- void start_competition(ros::NodeHandle & node){
+void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
   ros::ServiceClient begin_client =
     node.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
@@ -48,10 +52,10 @@ std::vector<double> joint_positions;
   } else { // if the service was called and executed successfully, inform user
       ROS_INFO("Competition service called succesfully! %s", begin_comp.response.message.c_str());
   }
- }
+}
  
 
- void order_callback(const osrf_gear::Order::ConstPtr & order_msg) {
+void order_callback(const osrf_gear::Order::ConstPtr & order_msg) {
   ROS_INFO_STREAM("Received order:\n" << *order_msg);  // Display incoming order messages, which contain a unit_ids (string) and lists of shipments (vector).  
   received_orders.push_back(*order_msg); // Add new orders to the end of the list of orders
 }
@@ -111,35 +115,7 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 // Joint State Subscriber Callback, stores joint_states
 void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
 	joint_states = *msg;
-
-    std::vector<double> joint_positions = joint_states.position;
-    // Just for printing joint positions
-    std::stringstream ss;
-    for (auto it = joint_positions.begin(); it != joint_positions.end(); it++)    {
-        if (it != joint_positions.begin()) {
-            ss << " ";
-        }
-        ss << *it;
-    }
- 
-ROS_INFO_STREAM("Joint Positions: " << ss.str());
-
-// Dr. Lee's example code for updating transformation matrix
-    double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};
-    
-
-	 double T[4][4];
-
-	
-	ur_kinematics::forward(&q[0], &T[0][0]);
-	 
-	ROS_INFO_STREAM("Camera Pose: " << *T);
-	 
-	
-	//ROS_INFO_STREAM("I AM HERE " << *msg.position);
 }
-
-
 
 // Method for identifying the name of the bin that a given product is in.
 std::string find_bin(std::string material_type, ros::ServiceClient client){
@@ -162,8 +138,69 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
   return "NONE"; // if no storage units contain the given material type, return "NONE"
 }
  
-
- 
+trajectory_msgs::JointTrajectory getTrajectory(geometry_msgs::PoseStamped goal_pose){
+	double T_des[4][4];
+	double q_des[8][6];
+	// Desired pose of the end effector wrt the base_link.
+	T_des[0][3] = goal_pose.pose.position.x;
+	T_des[1][3] = goal_pose.pose.position.y;
+	T_des[2][3] = goal_pose.pose.position.z + 0.3; // above part
+	T_des[3][3] = 1.0;
+	// The orientation of the end effector so that the end effector is down.
+	T_des[0][0] = 0.0; T_des[0][1] = -1.0; T_des[0][2] = 0.0;
+	T_des[1][0] = 0.0; T_des[1][1] = 0.0; T_des[1][2] = 1.0;
+	T_des[2][0] = -1.0; T_des[2][1] = 0.0; T_des[2][2] = 0.0;
+	T_des[3][0] = 0.0;  T_des[3][1] = 0.0; T_des[3][2] = 0.0;
+			
+	int num_sols = ur_kinematics::inverse((double *)&T_des, (double *)&q_des);
+			
+	// Declare a variable for generating and publishing a trajectory.
+	trajectory_msgs::JointTrajectory joint_trajectory;
+	// Fill out the joint trajectory header.
+	// Each joint trajectory should have an non-monotonically increasing sequence number.
+	joint_trajectory.header.seq = count++;
+	joint_trajectory.header.stamp = ros::Time::now(); // When was this message created.
+	joint_trajectory.header.frame_id = "/world"; // Frame in which this is specified.
+				
+	// Set the names of the joints being used.  All must be present.
+	joint_trajectory.joint_names.clear();
+	joint_trajectory.joint_names.push_back("linear_arm_actuator_joint");
+	joint_trajectory.joint_names.push_back("shoulder_pan_joint");
+	joint_trajectory.joint_names.push_back("shoulder_lift_joint");
+	joint_trajectory.joint_names.push_back("elbow_joint");
+	joint_trajectory.joint_names.push_back("wrist_1_joint");
+	joint_trajectory.joint_names.push_back("wrist_2_joint");
+	joint_trajectory.joint_names.push_back("wrist_3_joint");
+				
+	// Set a start and end point.
+	joint_trajectory.points.resize(2);
+	// Set the start point to the current position of the joints from joint_states.
+	joint_trajectory.points[0].positions.resize(joint_trajectory.joint_names.size());
+	for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
+		for (int indz = 0; indz < joint_states.name.size(); indz++) {
+			if (joint_trajectory.joint_names[indy] == joint_states.name[indz]) {
+				joint_trajectory.points[0].positions[indy] = joint_states.position[indz];
+				break;
+			}
+		}
+	}
+	// When to start (immediately upon receipt).
+	joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
+			
+	// Must select which of the num_sols solutions to use.  Just start with the first.
+	int q_des_indx = 0;
+	// Set the end point for the movement
+	joint_trajectory.points[1].positions.resize(joint_trajectory.joint_names.size());
+	// Set the linear_arm_actuator_joint from joint_states as it is not part of the inversen kinematics solution.
+	joint_trajectory.points[1].positions[0] = joint_states.position[1];
+	// The actuators are commanded in an odd order, enter the joint positions in the correct positions
+	for (int indy = 0; indy < 6; indy++) {
+		joint_trajectory.points[1].positions[indy + 1] = q_des[q_des_indx][indy];
+	}
+	// How long to take for the movement.
+	joint_trajectory.points[1].time_from_start = ros::Duration(1.0);
+	return joint_trajectory;
+} 
  
 int main(int argc, char **argv)
 {
@@ -203,6 +240,9 @@ int main(int argc, char **argv)
    * than we can send them, the number here specifies how many messages to
    * buffer up before throwing some away.
    */
+   
+   tf2_ros::Buffer tfBuffer;
+   tf2_ros::TransformListener tfListener(tfBuffer);
 
 	// Subscriber nodes for logical cameras.
 	ros::Subscriber camera_agv1_sub = n.subscribe("/ariac/logical_camera_agv1", 10, agv1_callback);
@@ -219,6 +259,11 @@ int main(int argc, char **argv)
 	//JointState subscriber
 	ros::Subscriber joint_state_sub = n.subscribe("/ariac/arm1/joint_states", 10, joint_state_callback);
 	
+	// Instantiate variables for use with the kinematic system.
+	double T_pose[4][4], T_des[4][4];
+	double q_pose[6], q_des[8][6];
+	trajectory_msgs::JointTrajectory desired;
+	
   //Subscribe to the '/ariac/orders' topic.
   ros::Subscriber orders_subscriber = n.subscribe("/ariac/orders", 10, order_callback);
   
@@ -231,7 +276,6 @@ int main(int argc, char **argv)
   
   ros::AsyncSpinner spinner(4);
   spinner.start();
-  
   while (ros::ok())
   {
 
@@ -252,13 +296,60 @@ int main(int argc, char **argv)
 					else{
 						mat_bin.insert(std::pair<std::string, std::pair<std::string, int>>{product.type.c_str(), std::pair<std::string, int>{bin, 1}});
 					}
-					geometry_msgs::Point position = image_map[bin].models[0].pose.position;
-					ROS_WARN_STREAM(product.type.c_str() << " is in bin: " << bin << " at position: x " << position.x << ", y " << position.y << ", z " << position.z);
+					geometry_msgs::Pose pose = image_map[bin].models[0].pose;
+					// ROS_WARN_STREAM(product.type.c_str() << " is in bin: " << bin << " at position: x " << position.x << ", y " << position.y << ", z " << position.z);
+					
+					
+				//START CONVERSION OF PART POSITION RELATIVE TO ARM
+					// find camera frame
+					std::string camera_frame_name = "logical_camera_" + bin + "_frame";
+					
+					// Retrieve the transformation
+					geometry_msgs::TransformStamped tfStamped;
+					try {
+						tfStamped = tfBuffer.lookupTransform("arm1_base_link", camera_frame_name,
+						ros::Time(0.0), ros::Duration(1.0));
+						ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(),
+						tfStamped.child_frame_id.c_str());
+					} catch (tf2::TransformException &ex) {
+						ROS_ERROR("%s", ex.what());
+					}
+					
+					geometry_msgs::PoseStamped part_pose, goal_pose;
+					
+					part_pose.pose = pose;
+					
+					tf2::doTransform(part_pose, goal_pose, tfStamped);
+					
+					// Add height to the goal pose.
+					goal_pose.pose.position.z += 0.10; // 10 cm above the part
+					// Tell the end effector to rotate 90 degrees around the y-axis (in quaternions...).
+					goal_pose.pose.orientation.w = 0.707;
+					goal_pose.pose.orientation.x = 0.0;
+					goal_pose.pose.orientation.y = 0.707;
+					goal_pose.pose.orientation.z = 0.0;
+					
+					ROS_WARN_STREAM(goal_pose);
+					
+					//START PROCESSING JOINT TRAJECTORY MESSAGE CONSTRUCTION
+					q_pose[0] = joint_states.position[1];
+					q_pose[1] = joint_states.position[2];
+					q_pose[2] = joint_states.position[3];
+					q_pose[3] = joint_states.position[4];
+					q_pose[4] = joint_states.position[5];
+					q_pose[5] = joint_states.position[6];
+					
+					//ur_kinematics::forward((float *)&q_pose, (double *)&T_pose);
+					
+					
+					trajectory_msgs::JointTrajectory trajectory = getTrajectory(goal_pose);
+					
+					ROS_WARN_STREAM(trajectory);
 				}
 			}
 		}
 		
-		//ROS_INFO_STREAM_THROTTLE(10, joint_states);
+		ROS_INFO_STREAM_THROTTLE(10, joint_states);
 		
 	  loop_rate.sleep();
 
