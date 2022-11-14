@@ -24,6 +24,7 @@
  std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
  std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_name, value = output of camera with poses of parts and pose of camera
  sensor_msgs::JointState joint_states;
+std::vector<double> joint_positions;
  
  void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
@@ -110,8 +111,35 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 // Joint State Subscriber Callback, stores joint_states
 void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
 	joint_states = *msg;
-	ROS_INFO_STREAM("I AM HERE " << *msg);
+
+    std::vector<double> joint_positions = joint_states.position;
+    // Just for printing joint positions
+    std::stringstream ss;
+    for (auto it = joint_positions.begin(); it != joint_positions.end(); it++)    {
+        if (it != joint_positions.begin()) {
+            ss << " ";
+        }
+        ss << *it;
+    }
+ 
+ROS_INFO_STREAM("Joint Positions: " << ss.str());
+
+// Dr. Lee's example code for updating transformation matrix
+    double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};
+    
+
+	 double T[4][4];
+
+	
+	ur_kinematics::forward(&q[0], &T[0][0]);
+	 
+	ROS_INFO_STREAM("Camera Pose: " << *T);
+	 
+	
+	//ROS_INFO_STREAM("I AM HERE " << *msg.position);
 }
+
+
 
 // Method for identifying the name of the bin that a given product is in.
 std::string find_bin(std::string material_type, ros::ServiceClient client){
@@ -135,7 +163,6 @@ std::string find_bin(std::string material_type, ros::ServiceClient client){
 }
  
 
- 
  
  
 int main(int argc, char **argv)
