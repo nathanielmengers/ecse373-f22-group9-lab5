@@ -1,4 +1,7 @@
 <launch>
-  <arg name="competition_mode" value="$(optenv ARIAC_COMPETITION true)" />
+  //<arg name="competition_mode" value="$(optenv ARIAC_COMPETITION true)" />
   <include file="$(find ecse_373_ariac)/launch/ecse_373_ariac.launch" pass_all_args = "true"/>
+
+  
+    <node pkg = "cwru_ecse_373_submission" type = "lab_node" name = "lab_node" /> 
 </launch>
