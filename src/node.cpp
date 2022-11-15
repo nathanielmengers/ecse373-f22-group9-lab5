@@ -18,9 +18,11 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <unistd.h>
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
+
 
 
 std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
@@ -204,6 +206,10 @@ trajectory_msgs::JointTrajectory getTrajectory(geometry_msgs::PoseStamped goal_p
  
 int main(int argc, char **argv)
 {
+    ROS_ERROR("Waiting 10 seconds for ecse_373_ariac to complete");
+    sleep(10);
+    ROS_ERROR("Executing node.cpp");
+
   /**
    * The ros::init() function needs to see argc and argv so that it can perform
    * any ROS arguments and name remapping that were provided at the command line.
