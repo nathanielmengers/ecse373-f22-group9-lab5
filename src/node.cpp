@@ -23,9 +23,11 @@
 #include <actionlib/client/terminal_state.h>
 // The Action Server "message type"
 #include <control_msgs/FollowJointTrajectoryAction.h>
+#include <unistd.h>
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
+
 
 
 std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
@@ -209,6 +211,10 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
  
 int main(int argc, char **argv)
 {
+    ROS_ERROR("Waiting 10 seconds for ecse_373_ariac to complete");
+    sleep(10);
+    ROS_ERROR("Executing node.cpp");
+
   /**
    * The ros::init() function needs to see argc and argv so that it can perform
    * any ROS arguments and name remapping that were provided at the command line.
