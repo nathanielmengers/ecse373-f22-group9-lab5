@@ -4,5 +4,5 @@
 
   <arg name = "node_start_delay" default = "10.0" />
   
-  <node pkg = "cwru_ecse_373_submission" type = "lab_node" name = "lab_node" launch-prefix="bash -c 'sleep $(arg node_start_delay); $0 $@' "/> 
+  <node pkg = "cwru_ecse_373_submission" type = "lab_node" name = "lab_node"/> 
 </launch>
