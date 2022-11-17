@@ -148,6 +148,34 @@ std::string find_bin(std::string material_type, ros::ServiceClient *client){
 int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry_msgs::PoseStamped *goal_pose, double *p_T_des, double *p_q_des){
 
 	//THIS NEEDS FIXED
+    // first row of transformation matrix
+    *p_T_des = 0.0; p_T_des++;
+    *p_T_des = -1.0; p_T_des++;
+    *p_T_des = 0.0; p_T_des++;
+	*p_T_des = goal_pose->pose.position.x; p_T_des++;
+	
+	//2nd row
+	*p_T_des = 0.0; p_T_des++;
+	*p_T_des = 0.0; p_T_des++;
+    *p_T_des = 1.0; p_T_des++;
+	*p_T_des = goal_pose->pose.position.y; p_T_des++;
+	
+	// 3rd row
+	*p_T_des = -1.0; p_T_des++; 
+	*p_T_des = 0.0; p_T_des++; 
+	*p_T_des = 0.0; p_T_des++; 
+	*p_T_des = goal_pose->(pose.position.z + 0.3); p_T_des++; // above part
+
+    // 4th row
+	*p_T_des = 0.0; p_T_des++; 
+	*p_T_des = 0.0; p_T_des++;  
+	*p_T_des = 0.0; p_T_des++; 
+	*p_T_des = 1.0;
+	// The orientation of the end effector so that the end effector is down.
+	
+	
+
+	/*
 	// Desired pose of the end effector wrt the base_link.
 	p_T_des[0][3] = goal_pose->pose.position.x;
 	p_T_des[1][3] = goal_pose->pose.position.y;
@@ -158,7 +186,7 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 	p_T_des[1][0] = 0.0; p_T_des[1][1] = 0.0; p_T_des[1][2]  = 1.0;
 	p_T_des[2][0] = -1.0; p_T_des[2][1] = 0.0; p_T_des[2][2] = 0.0;
 	p_T_des[3][0] = 0.0;  p_T_des[3][1] = 0.0; p_T_des[3][2] = 0.0;
-	
+	*/
 	int num_sols = ur_kinematics::inverse((double *)&p_T_des, (double *)&p_q_des);
 	
 	// Fill out the joint trajectory header.
@@ -204,6 +232,7 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 	p_joint_trajectory->points[1].positions[0] = joint_states.position[1];
 
 	// The actuators are commanded in an odd order, enter the joint positions in the correct positions
+	
 	for (int indy = 0; indy < 6; indy++) {
 		p_joint_trajectory->points[1].positions[indy + 1] = //THIS NEEDS FIXED p_q_des[q_des_indx][indy];
 	}
