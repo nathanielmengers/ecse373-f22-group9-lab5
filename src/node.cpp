@@ -145,7 +145,7 @@ std::string find_bin(std::string material_type, ros::ServiceClient *client){
   return "NONE"; // if no storage units contain the given material type, return "NONE"
 }
 
-int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry_msgs::PoseStamped *goal_pose, double *p_T_des, double *p_q_des){
+int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry_msgs::PoseStamped *goal_pose, double p_T_des[4][4], double p_q_des[8][6]){
 
 	//THIS NEEDS FIXED
 	// Desired pose of the end effector wrt the base_link.
@@ -154,12 +154,12 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 	p_T_des[2][3] = goal_pose->pose.position.z + 0.3; // above part
 	p_T_des[3][3] = 1.0;
 	// The orientation of the end effector so that the end effector is down.
-	*p_T_des = 0.0; p_T_des[0][1] = -1.0; p_T_des[0][2] = 0.0;
+	p_T_des[0][0] = 0.0; p_T_des[0][1] = -1.0; p_T_des[0][2] = 0.0;
 	p_T_des[1][0] = 0.0; p_T_des[1][1] = 0.0; p_T_des[1][2]  = 1.0;
 	p_T_des[2][0] = -1.0; p_T_des[2][1] = 0.0; p_T_des[2][2] = 0.0;
 	p_T_des[3][0] = 0.0;  p_T_des[3][1] = 0.0; p_T_des[3][2] = 0.0;
 	
-	int num_sols = ur_kinematics::inverse((double *)&p_T_des, (double *)&p_q_des);
+	int num_sols = ur_kinematics::inverse((double *)&p_T_des[0][0], (double *)&p_q_des[0][0]);
 	
 	// Fill out the joint trajectory header.
 	// Each joint trajectory should have an non-monotonically increasing sequence number.
@@ -179,7 +179,6 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 	p_joint_trajectory->joint_names.push_back("wrist_1_joint");
 	p_joint_trajectory->joint_names.push_back("wrist_2_joint");
 	p_joint_trajectory->joint_names.push_back("wrist_3_joint");
-				
 
 	// Set a start and end point.
 	p_joint_trajectory->points.resize(2);
@@ -205,7 +204,7 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 
 	// The actuators are commanded in an odd order, enter the joint positions in the correct positions
 	for (int indy = 0; indy < 6; indy++) {
-		p_joint_trajectory->points[1].positions[indy + 1] = //THIS NEEDS FIXED p_q_des[q_des_indx][indy];
+		p_joint_trajectory->points[1].positions[indy + 1] = p_q_des[q_des_indx][indy]; //THIS NEEDS FIXED
 	}
 
 	// How long to take for the movement.
@@ -292,7 +291,7 @@ int main(int argc, char **argv)
   location_client.waitForExistence();
   
   // Instantiate the Action Server client
-	actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> trajectory_as("ariac/arm/follow_joint_trajectory", true);
+	actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> trajectory_as("ariac/arm1/arm/follow_joint_trajectory", true);
   
   ros::Rate loop_rate(10);
   start_competition(n);
@@ -364,7 +363,7 @@ int main(int argc, char **argv)
 					
 					
 					
-					int status = getTrajectory(&trajectory, &goal_pose, &T_des[0][0], &q_des[0][0]);
+					int status = getTrajectory(&trajectory, &goal_pose, T_des, q_des);
 					
 					ROS_WARN_STREAM("TRAJECTORY: " << trajectory);
 					
@@ -375,14 +374,12 @@ int main(int argc, char **argv)
 					joint_trajectory_as.action_goal.goal.trajectory = trajectory;
 					joint_trajectory_as.action_goal.header = trajectory.header;
 					joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
-					joint_trajectory_as.action_goal.goal_id.id = count;
+					joint_trajectory_as.action_goal.goal_id.id = std::to_string(count);
+					
+					ROS_WARN_STREAM("TRAJECTORY_AS: " << joint_trajectory_as);
 					
 					actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0));
 					ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
-					/*if(state.state_ != state.SUCCESS){
-						
-						
-					}*/
 				
 				}
 			}
@@ -392,6 +389,7 @@ int main(int argc, char **argv)
 		ROS_WARN_STREAM_THROTTLE(10, joint_states);
 		
 	  loop_rate.sleep();
+	  count++;
 
   }
 
