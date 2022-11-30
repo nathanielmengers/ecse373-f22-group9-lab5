@@ -638,7 +638,7 @@ int main(int argc, char **argv)
 					}
 					tf2::doTransform(bin_pose, linear_pose, tfStamped);
 					if(bin == "bin1"){
-						linear_y_pos = linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
+						linear_y_pos = -linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 					}else {
 						linear_y_pos = linear_pose.pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 					}
