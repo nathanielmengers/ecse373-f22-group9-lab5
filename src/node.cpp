@@ -24,6 +24,8 @@
 // The Action Server "message type"
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <unistd.h>
+#include <osrf_gear/VacuumGripperControl.h>
+#include <osrf_gear/VacuumGripperState.h>
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
@@ -36,11 +38,11 @@ std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_nam
 sensor_msgs::JointState joint_states;
 sensor_msgs::JointState previous_joint_state;
 int count = 0;
+bool vacuum_state;
  
 void start_competition(ros::NodeHandle & node){
  // Create a Service client for the correct service, i.e. '/ariac/start_competition'.
-  ros::ServiceClient begin_client =
-    node.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
+  ros::ServiceClient begin_client = node.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
   // If it's not already ready, wait for it to be ready.
   // Calling the Service using the client before the server is ready would fail.
   if (!begin_client.exists()) {
@@ -122,6 +124,10 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 // Joint State Subscriber Callback, stores joint_states
 void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
 	joint_states = *msg;
+}
+
+void vacuum_callback(const osrf_gear::VacuumGripperState::ConstPtr & msg){
+	//vacuum_state = msg.attached;
 }
 
 // Method for identifying the name of the bin that a given product is in.
@@ -384,6 +390,11 @@ int main(int argc, char **argv)
 	ros::Subscriber camera_qc1_sub = n.subscribe("/ariac/quality_control_sensor_1", 10, qc1_callback);
 	ros::Subscriber camera_qc2_sub = n.subscribe("/ariac/quality_control_sensor_2", 10, qc2_callback);
 	
+	
+	//VACUUM SERVICE CLIENT
+	ros::ServiceClient vacuum_client = n.serviceClient<osrf_gear::VacuumGripperControl>("/ariac/arm");
+	ros::Subscriber vacuum_state_sub = n.subscribe("/ariac/arm1/gripper/state", 10, vacuum_callback);
+
 	//JointState subscriber
 	ros::Subscriber joint_state_sub = n.subscribe("/ariac/arm1/joint_states", 10, joint_state_callback);
 	
@@ -419,6 +430,8 @@ int main(int argc, char **argv)
   
   ros::AsyncSpinner spinner(4);
   spinner.start();
+  
+  previous_joint_state = joint_states;
   while (ros::ok())
   {
 		// if there are active orders, find where the parts are
@@ -459,7 +472,7 @@ int main(int argc, char **argv)
 					}
 					tf2::doTransform(bin_pose, linear_pose, tfStamped);
 					if(bin == "bin1"){
-						linear_y_pos = linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
+						linear_y_pos = -linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 					}else {
 						linear_y_pos = linear_pose.pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 					}
@@ -491,8 +504,6 @@ int main(int argc, char **argv)
 					} catch (tf2::TransformException &ex) {
 						ROS_ERROR("%s", ex.what());
 					}
-					
-					previous_joint_state = joint_states;
 					
 					tf2::doTransform(bin_pose, first_pose, tfStamped);
 					if(bin == "bin1"){
@@ -527,9 +538,8 @@ int main(int argc, char **argv)
 					ROS_WARN("Action Server returned with status: [%i] %s", state1.state_, state1.toString().c_str());
 					
 					
-					
-					for(int i = 0; i < image_map[bin].models.size(); i++){
-						geometry_msgs::Pose pose = image_map[bin].models[i].pose;
+					// MOVE TO PART
+						geometry_msgs::Pose pose = image_map[bin].models[0].pose;
 						
 						//START CONVERSION OF PART POSITION RELATIVE TO ACTUATOR
 						
@@ -548,7 +558,7 @@ int main(int argc, char **argv)
 						}
 						tf2::doTransform(bin_pose, linear_pose, tfStamped);
 						if(bin == "bin1"){
-							linear_y_pos = linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
+							linear_y_pos = -linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 						}else {
 							linear_y_pos = linear_pose.pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
 						}
@@ -573,10 +583,9 @@ int main(int argc, char **argv)
 						
 						//START CONVERSION OF PART POSITION RELATIVE TO ARM
 						// find camera frame
-						std::string camera_frame_name = "logical_camera_" + bin + "_frame";
+						camera_frame_name = "logical_camera_" + bin + "_frame";
 						
 						// Retrieve the transformation
-						geometry_msgs::TransformStamped tfStamped;
 						try {
 							tfStamped = tfBuffer.lookupTransform("arm1_base_link", camera_frame_name,
 							ros::Time(0.0), ros::Duration(1.0));
@@ -619,7 +628,16 @@ int main(int argc, char **argv)
 						
 						actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
 						ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
-					}
+						
+						//GRAB PART
+						osrf_gear::VacuumGripperControl vacuum_control;  // Combination of the "request" and the "response".
+						vacuum_control.request.enable = true;
+  					vacuum_client.call(vacuum_control);  // Call service to start the vacuum.
+						
+						
+						
+						
+					
 					
 					//START MOVING ARM TO BETWEEN THE BINS
 					
@@ -730,11 +748,103 @@ int main(int argc, char **argv)
 						
 					//ROS_WARN_STREAM("TRAJECTORY_AS: " << joint_trajectory_as);
 						
-					actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
-					ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
+					actionlib::SimpleClientGoalState state_2 = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
+					ROS_WARN("Action Server returned with status: [%i] %s", state_2.state_, state.toString().c_str());
 					
+						
 					
+						//MOVE TO THE AGV WITH PART
+						
+						// find camera frame
+						camera_frame_name = "logical_camera_" + shipment.agv_id + "_frame";
+						part_pose.pose.position.x = product.pose.position.x;
+						part_pose.pose.position.y = product.pose.position.y;
+						part_pose.pose.position.z = product.pose.position.z;
+						pose = image_map[bin].models[0].pose;
+						
+						//Set up linear actuator position
+						try {
+							tfStamped = tfBuffer.lookupTransform("arm1_linear_arm_actuator", camera_frame_name, ros::Time(0.0), ros::Duration(1.0));
+							ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(),
+							tfStamped.child_frame_id.c_str());
+						} catch (tf2::TransformException &ex) {
+							ROS_ERROR("%s", ex.what());
+						}
+						tf2::doTransform(bin_pose, linear_pose, tfStamped);
+						if(shipment.agv_id == "agv2"){
+							linear_y_pos = -linear_pose.pose.position.y + sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
+						}else {
+							linear_y_pos = linear_pose.pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose.pose.position.x, 2));
+						}
+						
+						//Move the linear actuator to where it's needed first
+						status = move_actuator(&trajectory, linear_y_pos, 2.0);
+						
+						// Create the structure to populate for running the Action Server.
+						// It is possible to reuse the JointTrajectory from above
+						joint_trajectory_as.action_goal.goal.trajectory = trajectory;
+						joint_trajectory_as.action_goal.header = trajectory.header;
+						joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
+						joint_trajectory_as.action_goal.goal_id.id = std::to_string(count);
+							
+						//ROS_WARN_STREAM("TRAJECTORY_AS: " << joint_trajectory_as);
+							
+						actionlib::SimpleClientGoalState state_agv_0 = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
+						ROS_WARN("Action Server returned with status: [%i] %s", state_agv_0.state_, state02.toString().c_str());
+							
+					
+						
+						
+						//START CONVERSION OF PART POSITION RELATIVE TO ARM
+						
+						
+						// Retrieve the transformation
+						try {
+							tfStamped = tfBuffer.lookupTransform("arm1_base_link", camera_frame_name,
+							ros::Time(0.0), ros::Duration(1.0));
+							ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(),
+							tfStamped.child_frame_id.c_str());
+						} catch (tf2::TransformException &ex) {
+							ROS_ERROR("%s", ex.what());
+						}
+						
+						tf2::doTransform(part_pose, goal_pose, tfStamped);
+						
+						// Add height to the goal pose.
+						goal_pose.pose.position.z += 0.10; // 10 cm above the part
+						// Tell the end effector to rotate 90 degrees around the y-axis (in quaternions...).
+						goal_pose.pose.orientation.w = 0.707;
+						goal_pose.pose.orientation.x = 0.0;
+						goal_pose.pose.orientation.y = 0.707;
+						goal_pose.pose.orientation.z = 0.0;
+						
+						//ROS_WARN_STREAM("GOAL POSE: " << goal_pose);
+						
+						
+						status = getTrajectory(&trajectory, &goal_pose, T_des, q_des, 1.0);
+						
+						//ROS_WARN_STREAM("TRAJECTORY: " << trajectory);
+						
+						
+						// Create the structure to populate for running the Action Server.
+						// It is possible to reuse the JointTrajectory from above
+						joint_trajectory_as.action_goal.goal.trajectory = trajectory;
+						joint_trajectory_as.action_goal.header = trajectory.header;
+						joint_trajectory_as.action_goal.goal_id.stamp = ros::Time::now();
+						joint_trajectory_as.action_goal.goal_id.id = std::to_string(count);
+						
+						//ROS_WARN_STREAM("TRAJECTORY_AS: " << joint_trajectory_as);
+						
+						actionlib::SimpleClientGoalState state_agv_1 = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
+						ROS_WARN("Action Server returned with status: [%i] %s", state_agv_1.state_, state.toString().c_str());
+						
+						
+						//DROP PART ON AGV IN ORIENTATION
+						
+						//HOME POSITION ARM
 				}
+				
+				//SUBMIT SHIPMENT HERE
 			}
 			received_orders.erase(received_orders.begin()); 
 		}
