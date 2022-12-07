@@ -26,11 +26,14 @@
 #include <unistd.h>
 #include <osrf_gear/VacuumGripperControl.h>
 #include <osrf_gear/VacuumGripperState.h>
+#include <osrf_gear/AGVControl.h>
 
 //std_srvs::SetBool my_bool_var;
 // my_bool_var.request.data = true;
 
 
+#define MYSLEEP   10.0
+#define SUBMITWAIT 20.0
 
 std::vector<osrf_gear::Order> received_orders; // vector containing orders. Each order is a structure consisting of an order_id (string) and list of shipments (vector).
 std::map<std::string, std::pair<std::string, int>> mat_bin;  // key = material_type, value = pair where .first is bin_name and .second is number of products requested.
@@ -197,11 +200,26 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 			}
 		}
 	}
+	
+	
 	// When to start (immediately upon receipt).
 	p_joint_trajectory->points[0].time_from_start = ros::Duration(0.0);
 	
 	// Must select which of the num_sols solutions to use.  Just start with the first.
 	int q_des_indx = 0;
+	
+	for(int i = 0; i < 7; i++){
+		if(p_q_des[i][3] >= 3 && p_q_des[i][0] < 4 && p_q_des[i][1] > 3){
+			q_des_indx = i;
+		}
+	}
+	
+	ROS_WARN_STREAM(p_q_des[q_des_indx][0]);
+	ROS_WARN_STREAM(p_q_des[q_des_indx][1]);
+	ROS_WARN_STREAM(p_q_des[q_des_indx][2]);
+	ROS_WARN_STREAM(p_q_des[q_des_indx][3]);
+	ROS_WARN_STREAM(p_q_des[q_des_indx][4]);
+	ROS_WARN_STREAM(p_q_des[q_des_indx][5]);
 	
 	// Set the end point for the movement
 	p_joint_trajectory->points[1].positions.resize(p_joint_trajectory->joint_names.size());
@@ -217,7 +235,7 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 		p_joint_trajectory->points[1].positions[indy + 1] = p_q_des[q_des_indx][indy]; 
 	}
 	
-	p_T_des[2][3] += -0.07; //On Part
+	p_T_des[2][3] += -0.08; //On Part
 	
 	num_sols = ur_kinematics::inverse((double *)&p_T_des[0][0], (double *)&p_q_des[0][0]);
 	
@@ -322,7 +340,7 @@ int getHome(trajectory_msgs::JointTrajectory *p_joint_trajectory,double p_q_des[
 	
 	p_joint_trajectory->points[1].positions[0] = joint_states.position[1];
 
-	for (int indy = 0; indy < p_joint_trajectory->joint_names.size(); indy++) {
+	for (int indy = 1; indy < p_joint_trajectory->joint_names.size(); indy++) {
 		for (int indz = 0; indz < joint_states.name.size(); indz++) {
 			if (p_joint_trajectory->joint_names[indy] == q_names[indz]) {
 				p_joint_trajectory->points[1].positions[indy] = p_q_des[indz];
@@ -400,6 +418,9 @@ int main(int argc, char **argv)
 	ros::Subscriber camera_qc1_sub = n.subscribe("/ariac/quality_control_sensor_1", 10, qc1_callback);
 	ros::Subscriber camera_qc2_sub = n.subscribe("/ariac/quality_control_sensor_2", 10, qc2_callback);
 	
+	ros::ServiceClient submit_agv_client = n.serviceClient<osrf_gear::AGVControl>("/ariac/agv1");
+	
+	//ros::ServiceClient submit_shipment_client = n.serviceClient<osrf_gear::SubmitShipment("/ariac/submit_shipment");
 	
 	//VACUUM SERVICE CLIENT
 	ros::ServiceClient vacuum_client = n.serviceClient<osrf_gear::VacuumGripperControl>("/ariac/arm1/gripper/control");
@@ -440,6 +461,8 @@ int main(int argc, char **argv)
   
   ros::AsyncSpinner spinner(4);
   spinner.start();
+  
+  int part_count = 0;
   
   
   while (ros::ok())
@@ -550,7 +573,7 @@ int main(int argc, char **argv)
 					MOVE ARM TO THE PART
 					*/
 					//Linear actuator first
-						geometry_msgs::Pose pose = image_map[bin].models[0].pose;
+						geometry_msgs::Pose pose = image_map[bin].models[part_count].pose;
 						
 						//START CONVERSION OF PART POSITION RELATIVE TO ACTUATOR
 						
@@ -639,9 +662,9 @@ int main(int argc, char **argv)
 						//GRAB PART
 						osrf_gear::VacuumGripperControl vacuum_control;  // Combination of the "request" and the "response".
 						vacuum_control.request.enable = true;
-  					//vacuum_client.call(vacuum_control);  // Call service to start the vacuum.
+  					vacuum_client.call(vacuum_control);  // Call service to start the vacuum.
 						
-						sleep(10.0);
+						sleep(MYSLEEP);
 						
 						
 					
@@ -867,10 +890,11 @@ int main(int argc, char **argv)
 						tf2::doTransform(part_pose, goal_pose, tfStamped);
 						
 						// Tell the end effector to rotate 90 degrees around the y-axis (in quaternions...).
-						goal_pose.pose.orientation.w += 0.707;
-						goal_pose.pose.orientation.x += 0.0;
-						goal_pose.pose.orientation.y += 0.707;
-						goal_pose.pose.orientation.z += 0.0;
+						goal_pose.pose.position.z += 0.02;
+						goal_pose.pose.orientation.w = 0.707;
+						goal_pose.pose.orientation.x = 0.0;
+						goal_pose.pose.orientation.y = 0.707;
+						goal_pose.pose.orientation.z = 0.0;
 						
 						//ROS_WARN_STREAM("GOAL POSE: " << goal_pose);
 						
@@ -892,6 +916,17 @@ int main(int argc, char **argv)
 						state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
 						ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
 						
+						//Turn off the Vacuum Gripper
+						/*
+						DROP PART ON AGV IN ORIENTATION
+						*/
+						
+						//DROP PART
+						osrf_gear::VacuumGripperControl vacuum_control_off;  // Combination of the "request" and the "response".
+						vacuum_control_off.request.enable = false;
+  					vacuum_client.call(vacuum_control_off);  // Call service to start the vacuum.
+						
+						sleep(MYSLEEP);
 						
 						//Back to between AGV
 						//Relative to Bin Position for AGV.
@@ -945,16 +980,7 @@ int main(int argc, char **argv)
 					ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
 					
 						
-						/*
-						DROP PART ON AGV IN ORIENTATION
-						*/
 						
-						//DROP PART
-						osrf_gear::VacuumGripperControl vacuum_control_off;  // Combination of the "request" and the "response".
-						vacuum_control_off.request.enable = false;
-  					vacuum_client.call(vacuum_control_off);  // Call service to start the vacuum.
-						
-						sleep(10.0);
 						
 						
 						/*
@@ -989,10 +1015,17 @@ int main(int argc, char **argv)
 						ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
 						
 						
-						
+						part_count ++;
 				}
 				
 				//SUBMIT SHIPMENT HERE
+				
+				osrf_gear::AGVControl submitsrv;
+				submitsrv.request.shipment_type = shipment.shipment_type;
+				submit_agv_client.call(submitsrv);
+				
+				sleep(SUBMITWAIT);
+				
 			}
 			received_orders.erase(received_orders.begin()); 
 		}
