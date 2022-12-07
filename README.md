@@ -1,9 +1,7 @@
 # ecse373-f22-group9-lab5
 ## Introduction
 This package is designed by ECSE373/473 Lab Group 9 from Case Western Reserve University. It serves as foundation to participate (for practice) in the Ariac 2019
-competition. The main functions of this package include:
-- Receiving generated orders from console
-- Retrieve order information such as item type, bin location and desired part pose.
+competition. 
 ## Dependencies
 - ecse_373_ariac
 - rviz
