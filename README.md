@@ -40,4 +40,4 @@ Phase III
 Phase IV (Final Project)
 - The manipulator fulfills two orders, each of which contains two shipments with multiple parts each. 
 - Parts may originate in any bin and must be deposited on the AGV tray specified for that part/shipment.
-- Submits each shipment 
+- Submits each order with shipping service 
