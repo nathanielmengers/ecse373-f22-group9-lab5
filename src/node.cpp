@@ -41,6 +41,7 @@ std::map<std::string, osrf_gear::LogicalCameraImage> image_map; // key = bin_nam
 sensor_msgs::JointState joint_states;
 sensor_msgs::JointState previous_joint_state;
 int count = 0;
+bool first_time = true;
 bool vacuum_state;
  
 void start_competition(ros::NodeHandle & node){
@@ -127,6 +128,10 @@ void qc2_callback(const osrf_gear::LogicalCameraImage::ConstPtr & image_msg){
 // Joint State Subscriber Callback, stores joint_states
 void joint_state_callback(const sensor_msgs::JointState::ConstPtr & msg){
 	joint_states = *msg;
+	if(first_time){
+		previous_joint_state = joint_states;
+		first_time = false;
+	}	
 }
 
 void vacuum_callback(const osrf_gear::VacuumGripperState::ConstPtr & msg){
@@ -209,10 +214,11 @@ int getTrajectory(trajectory_msgs::JointTrajectory *p_joint_trajectory, geometry
 	int q_des_indx = 0;
 	
 	for(int i = 0; i < 7; i++){
-		if(p_q_des[i][3] >= 3 && p_q_des[i][0] < 4 && p_q_des[i][1] > 3){
+		if(p_q_des[i][3] >= 3  && p_q_des[i][1] > 3 && p_q_des[i][2] < 3 && p_q_des[i][4] > 3){
 			q_des_indx = i;
 		}
 	}
+	
 	
 	ROS_WARN_STREAM(p_q_des[q_des_indx][0]);
 	ROS_WARN_STREAM(p_q_des[q_des_indx][1]);
@@ -356,7 +362,15 @@ int getHome(trajectory_msgs::JointTrajectory *p_joint_trajectory,double p_q_des[
 
 //Gets the linear actuatory position relating to the part distance from the 
 double getLinear(geometry_msgs::PoseStamped *linear_pose, std::string bin){
-	return linear_pose->pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose->pose.position.x, 2));
+
+	double linear = linear_pose->pose.position.y - sqrt(pow(1.2, 2) - pow(linear_pose->pose.position.x, 2));
+	if(linear > 2.25){
+		linear = 2.25;
+	}
+	if(linear < -2.1){
+		linear = -2.1;
+	}
+	return linear;
 }
 
 int main(int argc, char **argv)
@@ -418,7 +432,8 @@ int main(int argc, char **argv)
 	ros::Subscriber camera_qc1_sub = n.subscribe("/ariac/quality_control_sensor_1", 10, qc1_callback);
 	ros::Subscriber camera_qc2_sub = n.subscribe("/ariac/quality_control_sensor_2", 10, qc2_callback);
 	
-	ros::ServiceClient submit_agv_client = n.serviceClient<osrf_gear::AGVControl>("/ariac/agv1");
+	ros::ServiceClient submit_agv1_client = n.serviceClient<osrf_gear::AGVControl>("/ariac/agv1");
+	ros::ServiceClient submit_agv2_client = n.serviceClient<osrf_gear::AGVControl>("/ariac/agv2");
 	
 	//ros::ServiceClient submit_shipment_client = n.serviceClient<osrf_gear::SubmitShipment("/ariac/submit_shipment");
 	
@@ -440,6 +455,7 @@ int main(int argc, char **argv)
 	trajectory_msgs::JointTrajectory trajectory;
 	std::string camera_frame_name;
 	double linear_y_pos = 0;
+	std::string agv;
 	
 	control_msgs::FollowJointTrajectoryAction joint_trajectory_as;
 	int status;
@@ -464,7 +480,6 @@ int main(int argc, char **argv)
   
   int part_count = 0;
   
-  
   while (ros::ok())
   {
 		// if there are active orders, find where the parts are
@@ -473,6 +488,7 @@ int main(int argc, char **argv)
 			osrf_gear::Order order = received_orders.at(0);
       // Each order contains a set of shipments, which in turn have a list of products. For all shipments in the current order, identify the bin that each product is in. 
       // Print the bin number and coordinates of the selected product in the bin. Track how many of that product type have been ordered (for inventory purposes).
+      
 			for(osrf_gear::Shipment shipment: order.shipments){
 				for(osrf_gear::Product product:shipment.products){
 					std::string bin = find_bin(product.type.c_str(), &location_client);
@@ -487,7 +503,7 @@ int main(int argc, char **argv)
 					
 					
 				
-					previous_joint_state = joint_states;
+					
 					/*
 					MOVE ARM BETWEEN BINS
 					*/
@@ -510,7 +526,7 @@ int main(int argc, char **argv)
 					linear_y_pos = getLinear(&linear_pose, bin);
 					
 					//Move the linear actuator to where it's needed first
-					status = move_actuator(&trajectory, linear_y_pos, 2.5);
+					status = move_actuator(&trajectory, linear_y_pos, 4.5);
 					
 					// Create the structure to populate for running the Action Server.
 					// It is possible to reuse the JointTrajectory from above
@@ -782,9 +798,9 @@ int main(int argc, char **argv)
 						MOVE TO THE AGV WITH PART
 						*/
 						// find camera frame
-						std::string agv = shipment.agv_id;
+						agv = shipment.agv_id;
 						if(shipment.agv_id == "any"){
-							agv = "agv1";
+							agv = "agv2";
 						}
 						
 						camera_frame_name = "logical_camera_" + agv + "_frame";
@@ -836,11 +852,8 @@ int main(int argc, char **argv)
 						}
 						
 						tf2::doTransform(bin_pose, first_pose, tfStamped);
-						if(agv == "agv2"){
-							first_pose.pose.position.x += 0.40;
-						}else{
-							first_pose.pose.position.x += -0.40;
-						}
+						first_pose.pose.position.x += -0.40;
+
 						first_pose.pose.position.z += -0.40;
 						first_pose.pose.orientation.w = 0.707;
 						first_pose.pose.orientation.x = 0.0;
@@ -948,11 +961,8 @@ int main(int argc, char **argv)
 						}
 						
 						tf2::doTransform(bin_pose, first_pose, tfStamped);
-						if(agv == "agv2"){
-							first_pose.pose.position.x += 0.40;
-						}else{
 							first_pose.pose.position.x += -0.40;
-						}
+					
 						first_pose.pose.position.z += -0.40;
 						first_pose.pose.orientation.w = 0.707;
 						first_pose.pose.orientation.x = 0.0;
@@ -979,8 +989,6 @@ int main(int argc, char **argv)
 					state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(10.0), ros::Duration(10.0));
 					ROS_WARN("Action Server returned with status: [%i] %s", state.state_, state.toString().c_str());
 					
-						
-						
 						
 						
 						/*
@@ -1022,8 +1030,11 @@ int main(int argc, char **argv)
 				
 				osrf_gear::AGVControl submitsrv;
 				submitsrv.request.shipment_type = shipment.shipment_type;
-				submit_agv_client.call(submitsrv);
-				
+				if(agv == "agv1"){
+					submit_agv1_client.call(submitsrv);
+				}else{
+					submit_agv2_client.call(submitsrv);
+				}
 				sleep(SUBMITWAIT);
 				
 			}
